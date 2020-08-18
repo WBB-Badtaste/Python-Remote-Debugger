@@ -2,21 +2,36 @@ from DobotRPC import RPCServer, loggers
 from A9Api import DType
 import asyncio
 import click
-import sys
+import platform
+import os
 import pdb
+
+{
+    "jsonrpc": "2.0",
+    "id": 1234213,
+    "method": "init",
+    "params": {
+        "code": 111111,
+        "portname": 222
+    }
+}
 
 
 def start_serve(level: str) -> None:
     APP_NAME = "Dobot_Debugger_Serve"
     IP = "127.0.0.1"
-    PORT = 9097
+    PORT = 9098
     loop = asyncio.get_event_loop()
     server = RPCServer(loop, IP, PORT)
 
     def quit() -> None:
         loop.stop()
 
-    async def debugger_init(cmd: str) -> None:
+    async def debugger_init(portname: str, code: str) -> None:
+        debugger = "debugger.exe" if platform.system(
+        ) == "windows" else "debugger"
+        app_dir = os.getcwd()
+        cmd = f"{app_dir}/{debugger} --portname {portname} --code {code}"
         proc = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -42,7 +57,7 @@ def start_serve(level: str) -> None:
         loggers.set_level(loggers.ERROR)
 
     server.register('quit', quit)
-    server.register('quit', quit)
+    server.register('init', debugger_init)
 
     loggers.get(APP_NAME).info("running...")
     try:

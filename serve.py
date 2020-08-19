@@ -81,11 +81,10 @@ class Serve(object):
                         "data": str(data, encoding="utf-8")
                     })
 
-        read_out_task = self.__loop.create_task(read_out_worker)
-        read_err_task = self.__loop.create_task(read_err_worker)
-        asyncio.get_event_loop()
-        asyncio.ensure_future(read_err_task)
-        asyncio.ensure_future(read_out_task)
+        read_out_task = asyncio.ensure_future(read_out_worker(),
+                                              loop=self.__loop)
+        read_err_task = asyncio.ensure_future(read_err_worker(),
+                                              loop=self.__loop)
 
         self.__proc_map[proc.pid] = (proc, read_out_task, read_err_task)
 

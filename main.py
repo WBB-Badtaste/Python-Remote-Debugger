@@ -1,10 +1,10 @@
-from .serve import Serve
-from .debug import debug
+from serve import Serve
+from debug import debug
 import click
 
 LOG_NAME = "Dobot_Debugger_Serve"
 IP = "127.0.0.1"
-PORT = 9098
+PORT = 9094
 
 
 @click.command()

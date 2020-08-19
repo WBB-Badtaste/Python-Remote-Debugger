@@ -16,49 +16,6 @@ import os
 MODUE_NAME = "Serve"
 
 
-class WebConsole(asyncio.streams.StreamWriter):
-    def __init__(self, rpc_server: RPCServer):
-        self.__rpc_server = rpc_server
-
-    @property
-    def seekable(self):
-        return False
-
-    @property
-    def writable(self):
-        return True
-
-    @property
-    def encoding(self):
-        return 'utf-8'
-
-    @property
-    def closed(self):
-        return self._stop_all.is_set()
-
-    def _run_server(self, host, port):
-        pass
-
-    def readline(self):
-        pass
-
-    read = readline
-
-    def writeline(self, data):
-        pass
-
-    write = writeline
-
-    def flush(self):
-        pass
-
-    def close(self):
-        pass
-
-    async def drain(self):
-        pass
-
-
 class Serve(object):
     def __init__(self, ip: str, port: int, log_name: str, log_level: str):
         super().__init__()
@@ -75,30 +32,79 @@ class Serve(object):
         else:
             loggers.set_level(loggers.ERROR)
 
+        self.__proc_map = {}
+        self.__running_flag = True
+
     def __quit(self) -> None:
         self.__loop.stop()
+
+    async def __debugger_write(self, pid: str, data: str) -> None:
+        temp = self.__proc_map.get(pid, None)
+        if temp is None:
+            raise Exception(f"Invaild pid: {pid}")
+        proc = temp[0]
+        await proc.stdin.write(data)
+        await proc.stdin.drain()
 
     async def __debugger_init(self, portname: str, code: str) -> None:
         debugger = "debugger.exe" if platform.system(
         ) == "windows" else "debugger"
         app_dir = os.getcwd()
         cmd = f"{app_dir}/{debugger} --portname {portname} --code {code}"
+        loggers.get(MODUE_NAME).info(cmd)
         proc = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE)
 
-        stdout, stderr = await proc.communicate()
+        async def read_out_worker():
+            while self.__running_flag:
+                data = await proc.stdout.read()
+                if len(data) <= 0:
+                    continue
+                await self.__server.notify(
+                    "read", {
+                        "pid": proc.pid,
+                        "type": "out",
+                        "data": str(data, encoding="utf-8")
+                    })
 
-        print(f'[{cmd!r} exited with {proc.returncode}]')
-        if stdout:
-            print(f'[stdout]\n{stdout.decode()}')
-        if stderr:
-            print(f'[stderr]\n{stderr.decode()}')
+        async def read_err_worker():
+            while self.__running_flag:
+                data = await proc.stderr.read()
+                if len(data) <= 0:
+                    continue
+                await self.__server.notify(
+                    "read", {
+                        "pid": proc.pid,
+                        "type": "error",
+                        "data": str(data, encoding="utf-8")
+                    })
+
+        read_out_task = self.__loop.create_task(read_out_worker)
+        read_err_task = self.__loop.create_task(read_err_worker)
+        asyncio.get_event_loop()
+        asyncio.ensure_future(read_err_task)
+        asyncio.ensure_future(read_out_task)
+
+        self.__proc_map[proc.pid] = (proc, read_out_task, read_err_task)
+
+        return {"pid": proc.pid}
+
+    async def __debugger_stop(self, pid: str):
+        temp = self.__proc_map.get(pid, None)
+        if temp is None:
+            raise Exception(f"Invaild pid: {pid}")
+        proc, read_out_task, read_err_task = temp
+        read_out_task.cancel()
+        read_err_task.cancel()
+        proc.kill()
 
     def start(self) -> None:
         self.__server.register('quit', self.__quit)
         self.__server.register('init', self.__debugger_init)
+        self.__server.register('write', self.__debugger_write)
+        self.__server.register('stop', self.__debugger_stop)
 
         loggers.get(MODUE_NAME).info("running...")
         try:

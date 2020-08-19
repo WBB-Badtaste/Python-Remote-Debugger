@@ -13,6 +13,8 @@ import os
     }
 }
 
+MODUE_NAME = "Serve"
+
 
 class WebConsole(asyncio.streams.StreamWriter):
     def __init__(self, rpc_server: RPCServer):
@@ -57,17 +59,26 @@ class WebConsole(asyncio.streams.StreamWriter):
         pass
 
 
-def start_serve(level: str) -> None:
-    APP_NAME = "Dobot_Debugger_Serve"
-    IP = "127.0.0.1"
-    PORT = 9098
-    loop = asyncio.get_event_loop()
-    server = RPCServer(loop, IP, PORT)
+class Serve(object):
+    def __init__(self, ip: str, port: int, log_name: str, log_level: str):
+        super().__init__()
+        self.__loop = asyncio.get_event_loop()
+        self.__server = RPCServer(self.__loop, ip, port)
+        loggers.set_level(loggers.DEBUG)
+        loggers.set_use_console(True)
+        loggers.set_use_file(False)
+        loggers.set_filename(log_name)
+        if log_level == "info":
+            loggers.set_level(loggers.INFO)
+        elif log_level == "debug":
+            loggers.set_level(loggers.DEBUG)
+        else:
+            loggers.set_level(loggers.ERROR)
 
-    def quit() -> None:
-        loop.stop()
+    def __quit(self) -> None:
+        self.__loop.stop()
 
-    async def debugger_init(portname: str, code: str) -> None:
+    async def __debugger_init(self, portname: str, code: str) -> None:
         debugger = "debugger.exe" if platform.system(
         ) == "windows" else "debugger"
         app_dir = os.getcwd()
@@ -85,23 +96,13 @@ def start_serve(level: str) -> None:
         if stderr:
             print(f'[stderr]\n{stderr.decode()}')
 
-    loggers.set_level(loggers.DEBUG)
-    loggers.set_use_console(True)
-    loggers.set_use_file(False)
-    loggers.set_filename(APP_NAME)
-    if level == "info":
-        loggers.set_level(loggers.INFO)
-    elif level == "debug":
-        loggers.set_level(loggers.DEBUG)
-    else:
-        loggers.set_level(loggers.ERROR)
+    def start(self) -> None:
+        self.__server.register('quit', self.__quit)
+        self.__server.register('init', self.__debugger_init)
 
-    server.register('quit', quit)
-    server.register('init', debugger_init)
-
-    loggers.get(APP_NAME).info("running...")
-    try:
-        loop.run_forever()
-    finally:
-        loop.close()
-    loggers.get(APP_NAME).info("quited.")
+        loggers.get(MODUE_NAME).info("running...")
+        try:
+            self.__loop.run_forever()
+        finally:
+            self.__loop.close()
+        loggers.get(MODUE_NAME).info("quited.")

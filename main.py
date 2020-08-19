@@ -1,6 +1,10 @@
-from .serve import start_serve
+from .serve import Serve
 from .debug import debug
 import click
+
+LOG_NAME = "Dobot_Debugger_Serve"
+IP = "127.0.0.1"
+PORT = 9098
 
 
 @click.command()
@@ -9,7 +13,7 @@ import click
 @click.option("--level", default="debug", help="Log Level", type=str)
 def main(portname: str, script: str, level: str):
     if portname is None and script is None:
-        start_serve(level)
+        Serve(IP, PORT, LOG_NAME, level).start()
     elif portname is not None and script is not None:
         debug(portname, script)
     else:

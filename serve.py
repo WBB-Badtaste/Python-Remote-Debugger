@@ -51,42 +51,82 @@ class Serve(object):
         ) == "windows" else "debugger"
         app_dir = os.getcwd()
         cmd = f"{app_dir}/{debugger} --portname {portname} --code {code}"
+
         loggers.get(MODUE_NAME).info(cmd)
         proc = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE)
 
+        # out_data, err_data = await proc.communicate()
+        # print("#######")
+        # print(str(out_data, encoding="utf-8"), str(err_data, encoding="utf-8"))
+        # return
+
+        # !!!!!!!!
         async def read_out_worker():
-            while self.__running_flag:
-                data = await proc.stdout.read()
-                if len(data) <= 0:
-                    continue
-                await self.__server.notify(
-                    "read", {
-                        "pid": proc.pid,
-                        "type": "out",
-                        "data": str(data, encoding="utf-8")
-                    })
+            try:
+                while self.__proc_map[proc.pid][4]:
+                    data = await proc.stdout.read()
+                    if len(data) <= 0:
+                        await asyncio.sleep(0.1, loop=self.__loop)
+                        continue
+                    await self.__server.notify(
+                        "read", {
+                            "pid": proc.pid,
+                            "type": "out",
+                            "data": str(data, encoding="utf-8")
+                        })
+            except Exception as e:
+                loggers.get(MODUE_NAME).warn(f"PID({proc.pid}), \
+Catch exception in read out worker: {e}")
+            finally:
+                loggers.get(MODUE_NAME).debug(
+                    f"PID({proc.pid}) read out worker exit.")
 
         async def read_err_worker():
-            while self.__running_flag:
-                data = await proc.stderr.read()
-                if len(data) <= 0:
-                    continue
-                await self.__server.notify(
-                    "read", {
-                        "pid": proc.pid,
-                        "type": "error",
-                        "data": str(data, encoding="utf-8")
-                    })
+            try:
+                while self.__proc_map[proc.pid][4]:
+                    data = await proc.stderr.read()
+                    if len(data) <= 0:
+                        await asyncio.sleep(0.1, loop=self.__loop)
+                        continue
+                    await self.__server.notify(
+                        "read", {
+                            "pid": proc.pid,
+                            "type": "error",
+                            "data": str(data, encoding="utf-8")
+                        })
+            except Exception as e:
+                loggers.get(MODUE_NAME).warn(f"PID({proc.pid}), \
+Catch exception in read err worker: {e}")
+            finally:
+                loggers.get(MODUE_NAME).debug(
+                    f"PID({proc.pid}) read err worker exit.")
+
+        async def waitting_worker():
+            try:
+                await proc.wait()
+                self.__proc_map[proc.pid][4] = False
+            except Exception as e:
+                loggers.get(MODUE_NAME).warn(f"PID({proc.pid}), \
+Catch exception in waitting worker: {e}")
+            finally:
+                loggers.get(MODUE_NAME).debug(
+                    f"PID({proc.pid}) waitting worker exit.")
 
         read_out_task = asyncio.ensure_future(read_out_worker(),
                                               loop=self.__loop)
         read_err_task = asyncio.ensure_future(read_err_worker(),
                                               loop=self.__loop)
+        waitting_task = asyncio.ensure_future(waitting_worker(),
+                                              loop=self.__loop)
 
-        self.__proc_map[proc.pid] = (proc, read_out_task, read_err_task)
+        worker_running_flag = True
+        self.__proc_map[proc.pid] = [
+            proc, read_out_task, read_err_task, waitting_task,
+            worker_running_flag
+        ]
 
         return {"pid": proc.pid}
 
@@ -94,10 +134,14 @@ class Serve(object):
         temp = self.__proc_map.get(pid, None)
         if temp is None:
             raise Exception(f"Invaild pid: {pid}")
-        proc, read_out_task, read_err_task = temp
+        proc, read_out_task, read_err_task, waitting_task, _ = temp
+        temp[4] = False
+        waitting_task.cancel()
         read_out_task.cancel()
         read_err_task.cancel()
+        await asyncio.gather([waitting_task, read_out_task, read_err_task])
         proc.kill()
+        del self.__proc_map[pid]
 
     def start(self) -> None:
         self.__server.register('quit', self.__quit)

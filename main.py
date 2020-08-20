@@ -8,9 +8,9 @@ PORT = 9094
 
 
 @click.command()
-@click.option("--portname", default=None, help="Device PortName", type=str)
-@click.option("--script", default=None, help="Python Script", type=str)
-@click.option("--level", default="debug", help="Log Level", type=str)
+@click.option("--portname", default=None, help="device portname", type=str)
+@click.option("--script", default=None, help="python script", type=str)
+@click.option("--level", default="debug", help="log level", type=str)
 def main(portname: str, script: str, level: str):
     if portname is None and script is None:
         Serve(IP, PORT, LOG_NAME, level).start()

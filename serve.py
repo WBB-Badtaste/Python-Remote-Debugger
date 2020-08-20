@@ -8,7 +8,7 @@ import os
     "id": 1234213,
     "method": "init",
     "params": {
-        "code": 111111,
+        "script": "cHJpbnQoMTExMSk=",
         "portname": 222
     }
 }
@@ -46,11 +46,11 @@ class Serve(object):
         await proc.stdin.write(data)
         await proc.stdin.drain()
 
-    async def __debugger_init(self, portname: str, code: str) -> None:
+    async def __debugger_init(self, portname: str, script: str) -> None:
         debugger = "debugger.exe" if platform.system(
         ) == "windows" else "debugger"
         app_dir = os.getcwd()
-        cmd = f"{app_dir}/{debugger} --portname {portname} --code {code}"
+        cmd = f"{app_dir}/{debugger} --portname {portname} --script {script}"
 
         loggers.get(MODUE_NAME).info(cmd)
         proc = await asyncio.create_subprocess_shell(
@@ -67,7 +67,9 @@ class Serve(object):
         async def read_out_worker():
             try:
                 while self.__proc_map[proc.pid][4]:
+                    print(11111)
                     data = await proc.stdout.read()
+                    print(22222)
                     if len(data) <= 0:
                         await asyncio.sleep(0.1, loop=self.__loop)
                         continue
@@ -87,7 +89,9 @@ Catch exception in read out worker: {e}")
         async def read_err_worker():
             try:
                 while self.__proc_map[proc.pid][4]:
+                    print(33333)
                     data = await proc.stderr.read()
+                    print(44444)
                     if len(data) <= 0:
                         await asyncio.sleep(0.1, loop=self.__loop)
                         continue
@@ -106,7 +110,9 @@ Catch exception in read err worker: {e}")
 
         async def waitting_worker():
             try:
+                print(5555)
                 await proc.wait()
+                print(6666)
                 self.__proc_map[proc.pid][4] = False
             except Exception as e:
                 loggers.get(MODUE_NAME).warn(f"PID({proc.pid}), \

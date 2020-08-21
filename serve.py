@@ -23,14 +23,9 @@ import os
     }
 }
 
-{
-    "jsonrpc": "2.0",
-    "id": 1234213,
-    "method": "stop",
-    "params": {
-        "pid": 14916
-    }
-}
+{"jsonrpc": "2.0", "id": 1234213, "method": "stop", "params": {"pid": 15254}}
+
+{"jsonrpc": "2.0", "id": 1234213, "method": "quit", "params": {}}
 
 MODUE_NAME = "Serve"
 

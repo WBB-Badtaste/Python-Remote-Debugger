@@ -4,15 +4,25 @@ import asyncio
 import pdb
 import os
 import base64
+import platform
 
 loop = asyncio.get_event_loop()
 
 
-def debug(portname: str, script: str) -> None:
-    loggers.set_level(loggers.DEBUG)
+def debug(portname: str, script: str, log_level: str, log_dir: str) -> None:
     loggers.set_use_console(False)
     loggers.set_use_file(True)
-    loggers.set_filename(f"Debugger({os.getpid()})")
+    log_dir = log_dir or os.getcwd()
+    log_name = f"{log_dir}\\Debugger({os.getpid()})" if platform.system(
+    ) == "Windows" else f"{log_dir}/Debugger({os.getpid()})"
+
+    loggers.set_filename(log_name)
+    if log_level == "info":
+        loggers.set_level(loggers.INFO)
+    elif log_level == "debug":
+        loggers.set_level(loggers.DEBUG)
+    else:
+        loggers.set_level(loggers.ERROR)
 
     try:
         script = base64.b64decode(script)

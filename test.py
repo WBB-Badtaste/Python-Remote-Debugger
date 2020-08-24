@@ -4,10 +4,9 @@ import signal
 
 async def main():
     proc = await asyncio.create_subprocess_shell(
-        "/Users/jomar/Documents/GitHub/Python-Remote-Debugger/dist/test2.app/Contents/MacOS/test2"
-    )
-    await asyncio.sleep(15)
-    proc.send_signal(signal.SIGKILL)
+        "\\\\Mac\\Home\\Documents\\GitHub\\Python-Remote-Debugger\\debugger.exe --portname 222 --script cHJpbnQoMTExMSk=")
+    # await asyncio.sleep(15)
+    # proc.send_signal(signal.SIGKILL)
     await proc.wait()
 
 

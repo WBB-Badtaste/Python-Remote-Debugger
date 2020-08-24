@@ -18,7 +18,7 @@ import os
     "id": 1234213,
     "method": "write",
     "params": {
-        "pid": 13523,
+        "pid": 9372,
         "data": "q"
     }
 }
@@ -31,10 +31,13 @@ MODUE_NAME = "Serve"
 
 
 class Serve(object):
-    def __init__(self, ip: str, port: int, log_name: str, log_level: str):
+    def __init__(self, ip: str, port: int, log_name: str, log_level: str,
+                 log_dir: str):
         super().__init__()
         self.__loop = asyncio.get_event_loop()
         self.__server = RPCServer(self.__loop, ip, port)
+        self.__log_level = log_level
+        self.__log_dir = log_dir
         loggers.set_use_console(True)
         loggers.set_use_file(False)
         loggers.set_filename(log_name)
@@ -61,10 +64,13 @@ class Serve(object):
         await proc.stdin.drain()
 
     async def __debugger_init(self, portname: str, script: str) -> None:
-        debugger = "debugger.exe" if platform.system(
-        ) == "windows" else "debugger"
         app_dir = os.getcwd()
-        cmd = f"{app_dir}/{debugger} --portname {portname} --script {script}"
+        log_dir = self.__log_dir or app_dir
+        log_level = self.__log_level
+        debugger = f"{app_dir}\\debugger.exe" if platform.system(
+        ) == "Windows" else f"{app_dir}/debugger"
+
+        cmd = f"{debugger} --portname {portname} --script {script} --level {log_level} --log_dir {log_dir}"
 
         loggers.get(MODUE_NAME).info(cmd)
         proc = await asyncio.create_subprocess_shell(
@@ -72,6 +78,18 @@ class Serve(object):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE)
+
+        while True:
+            out, err = await asyncio.gather(proc.stdout.readline(),
+                                            proc.stderr.readline())
+            if len(out) > 0:
+                out = str(out, encoding="utf-8")
+                if "> <string>(1)<module>()" in out:
+                    break
+            elif len(err) > 0:
+                print(str(err, encoding="utf-8"))
+            else:
+                await asyncio.sleep(0.1, loop=self.__loop)
 
         async def read_out_worker():
             try:

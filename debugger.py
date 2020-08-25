@@ -162,13 +162,14 @@ class Debugger(object):
 
         await self.__write(portname)
         await self.__write(script)
-        await self.__write("n")
         event = asyncio.Event(loop=self.__loop)
         event.clear()
 
+        await self.__write("n")
+
         async def __start_hook():
-            await self.__write("n")
             event.set()
+            await self.__write("n")
 
         self.__pipe_hooks.append(__start_hook)
         await event.wait()
@@ -199,9 +200,11 @@ class Debugger(object):
         event = asyncio.Event(loop=self.__loop)
         event.clear()
 
+        await self.__write("n")
+
         async def __resume_hook():
-            await self.__write("n")
             event.set()
+            await self.__write("n")
 
         self.__pipe_hooks.append(__resume_hook)
         await event.wait()

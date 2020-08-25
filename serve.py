@@ -4,29 +4,6 @@ import asyncio
 import platform
 import os
 
-{
-    "jsonrpc": "2.0",
-    "id": 1234213,
-    "method": "start",
-    "params": {
-        "script": "aW1wb3J0IHRpbWUNCg0KDQp3aGlsZSAxOg0KICAgIHRpbWUuc2xlZXAoMSkNCiAgICBwcmludCgyMjIp",
-        "portname": 222
-    }
-}
-
-{
-    "jsonrpc": "2.0",
-    "id": 1234213,
-    "method": "stop",
-    "params": {
-        "pid": 14224
-    }
-}
-
-{"jsonrpc": "2.0", "id": 1234213, "method": "stop", "params": {"pid": 15254}}
-
-{"jsonrpc": "2.0", "id": 1234213, "method": "quit", "params": {}}
-
 MODUE_NAME = "Serve"
 
 

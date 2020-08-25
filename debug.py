@@ -9,7 +9,7 @@ import platform
 loop = asyncio.get_event_loop()
 
 
-def debug(portname: str, script: str, log_level: str, log_dir: str) -> None:
+def debug(log_level: str, log_dir: str) -> None:
     loggers.set_use_console(False)
     loggers.set_use_file(True)
     log_dir = log_dir or os.getcwd()
@@ -23,6 +23,10 @@ def debug(portname: str, script: str, log_level: str, log_dir: str) -> None:
         loggers.set_level(loggers.DEBUG)
     else:
         loggers.set_level(loggers.ERROR)
+
+    print(f"pid {os.getpid()}")
+    portname = input()
+    script = input()
 
     try:
         script = base64.b64decode(script)

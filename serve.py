@@ -1,4 +1,5 @@
 from DobotRPC import RPCServer, loggers
+from debugger import Debugger
 import asyncio
 import platform
 import os
@@ -49,118 +50,60 @@ class Serve(object):
             loggers.set_level(loggers.ERROR)
 
         self.__proc_map = {}
-        self.__running_flag = True
+        self.__proc_idle = None
+        self.__debugger_create_feature = asyncio.ensure_future(
+            self.__debugger_create_worker, loop=self.__loop)
 
-    def __quit(self) -> None:
-        self.__loop.stop()
-
-    async def __debugger_write(self, pid: int, data: str) -> None:
-        temp = self.__proc_map.get(pid, None)
-        if temp is None:
-            raise Exception(f"Invaild pid: {pid}")
-        proc = temp[0]
-        data = bytes(f"{data}\n", encoding="utf8")
-        proc.stdin.write(data)
-        await proc.stdin.drain()
-
-    async def __debugger_init(self, portname: str, script: str) -> None:
+    async def __debugger_create_worker(self):
         app_dir = os.getcwd()
         log_dir = self.__log_dir or app_dir
         log_level = self.__log_level
         debugger = f"{app_dir}\\debugger.exe" if platform.system(
         ) == "Windows" else f"{app_dir}/debugger"
 
-        cmd = f"{debugger} --portname {portname} --script {script} --level {log_level} --log_dir {log_dir}"
+        cmd = f"{debugger} --level {log_level} --log_dir {log_dir} --mode debug"
 
-        loggers.get(MODUE_NAME).info(cmd)
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
+        debugger = Debugger(self.__loop, self.__server)
 
-        while True:
-            out, err = await asyncio.gather(proc.stdout.readline(),
-                                            proc.stderr.readline())
-            if len(out) > 0:
-                out = str(out, encoding="utf-8")
-                if "> <string>(1)<module>()" in out:
-                    break
-            elif len(err) > 0:
-                print(str(err, encoding="utf-8"))
-            else:
-                await asyncio.sleep(0.1, loop=self.__loop)
-
-        async def read_out_worker():
+        while self.__proc_idle is None:
             try:
-                while not proc.stdout.at_eof():
-                    data = await proc.stdout.readline()
-                    if len(data) <= 0:
-                        await asyncio.sleep(0.1, loop=self.__loop)
-                        continue
-                    await self.__server.notify(
-                        "read", {
-                            "pid": proc.pid,
-                            "type": "out",
-                            "data": str(data, encoding="utf-8")
-                        })
+                debugger = Debugger(self.__loop, self.__server)
+                await debugger.create_process(cmd)
+                self.__proc_idle = debugger
             except Exception as e:
-                loggers.get(MODUE_NAME).warn(f"PID({proc.pid}), \
-Catch exception in read out worker: {e}")
-            finally:
-                loggers.get(MODUE_NAME).debug(
-                    f"PID({proc.pid}) read out worker exit.")
+                loggers.get(MODUE_NAME).error(e)
+                self.__proc_idle = None
 
-        async def read_err_worker():
-            try:
-                while not proc.stderr.at_eof():
-                    data = await proc.stderr.readline()
-                    if len(data) <= 0:
-                        await asyncio.sleep(0.1, loop=self.__loop)
-                        continue
-                    await self.__server.notify(
-                        "read", {
-                            "pid": proc.pid,
-                            "type": "error",
-                            "data": str(data, encoding="utf-8")
-                        })
-            except Exception as e:
-                loggers.get(MODUE_NAME).warn(f"PID({proc.pid}), \
-Catch exception in read err worker: {e}")
-            finally:
-                loggers.get(MODUE_NAME).debug(
-                    f"PID({proc.pid}) read err worker exit.")
+    def __get_debugger(self, pid):
+        debugger = self.__proc_map.get(pid, None)
+        if debugger is None:
+            raise Exception(f"Invaild pid: {pid}")
+        return debugger
 
-        read_out_task = asyncio.ensure_future(read_out_worker(),
-                                              loop=self.__loop)
-        read_err_task = asyncio.ensure_future(read_err_worker(),
-                                              loop=self.__loop)
-
-        self.__proc_map[proc.pid] = [proc, read_out_task, read_err_task]
-
-        return {"pid": proc.pid}
+    async def __debugger_start(self, portname: str, script: str):
+        await self.__debugger_create_feature
+        await self.__proc_idle.start(portname, script)
+        pid = self.__proc_idle.pid
+        self.__proc_map[pid] = self.__proc_idle
+        self.__proc_idle = None
+        return {"pid", pid}
 
     async def __debugger_stop(self, pid: int):
-        temp = self.__proc_map.get(pid, None)
-        if temp is None:
-            raise Exception(f"Invaild pid: {pid}")
-        proc, read_out_task, read_err_task = temp
-        proc.terminate()
-        await asyncio.gather(proc.wait(), read_out_task, read_err_task)
+        await self.__get_debugger(pid).stop()
         del self.__proc_map[pid]
 
-    async def __debugger_start(self, pid: int):
-        self.__debugger_write()
+    async def __debugger_supend(self, pid: int):
+        await self.__get_debugger(pid).supend()
+
+    async def __debugger_resume(self, pid: int):
+        await self.__get_debugger(pid).resume()
 
     def start(self) -> None:
-        self.__server.register('quit', self.__quit)
-        self.__server.register('init', self.__debugger_init)
-        self.__server.register('write', self.__debugger_write)
+        self.__server.register('start', self.__debugger_start)
         self.__server.register('stop', self.__debugger_stop)
+        self.__server.register('resume', self.__debugger_resume)
+        self.__server.register('supend', self.__debugger_supend)
 
         loggers.get(MODUE_NAME).info("running...")
-        try:
-            self.__loop.run_forever()
-        finally:
-            self.__loop.close()
+        self.__loop.run_forever()
         loggers.get(MODUE_NAME).info("quited.")

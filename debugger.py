@@ -1,17 +1,19 @@
 from DobotRPC import loggers, RPCServer
 import asyncio
 from functools import wraps
+import re
 
 MODUE_NAME = "Debugger"
 
 
 def logit(func):
     @wraps(func)
-    def with_logging(*args, **kwargs):
-        loggers.get(MODUE_NAME).debug(f"{func.__name__} invoke", *args,
-                                      **kwargs)
-        res = func(*args, **kwargs)
-        loggers.get(MODUE_NAME).debug(f"{func.__name__} return", res)
+    async def with_logging(*args, **kwargs):
+        log = f"{func.__name__} << {args} << {kwargs}"
+        loggers.get(MODUE_NAME).debug(log)
+        res = await func(*args, **kwargs)
+        log = f"{func.__name__} >> {res}"
+        loggers.get(MODUE_NAME).debug(log)
         return res
 
     return with_logging
@@ -30,6 +32,8 @@ class Debugger(object):
         self.__pipe_hooks = []
         self.__state = None
 
+        self.__progress = -1
+
     @property
     def pid(self):
         return self.__pid
@@ -41,16 +45,12 @@ class Debugger(object):
     async def __read_err_worker(self):
         try:
             while not self.__proc.stderr.at_eof():
-                data = await self.__proc.stderr.readline()
-                if len(data) <= 0:
+                err = await self.__proc.stderr.readline()
+                if len(err) <= 0:
                     await asyncio.sleep(0.1, loop=self.__loop)
                     continue
-                await self.__server.notify(
-                    "read", {
-                        "pid": self.__pid,
-                        "type": "error",
-                        "data": str(data, encoding="utf-8")
-                    })
+                err = str(err, encoding="utf-8")
+                await self.__do_err(err)
         except Exception as e:
             loggers.get(MODUE_NAME).warn(
                 f"PID({self.__pid}), Exception in read err worker: {e}")
@@ -58,25 +58,57 @@ class Debugger(object):
             loggers.get(MODUE_NAME).debug(
                 f"PID({self.__pid}) read err worker exit.")
 
+    async def __do_progress(self, progress):
+        if self.__progress != progress:
+            self.__progress = progress
+            await self.__server.notify("progressFresh", {
+                "pid": self.__pid,
+                "progress": progress
+            })
+
+    async def __do_out(self, out):
+        await self.__server.notify("procOut", {"pid": self.__pid, "out": out})
+
+    async def __do_err(self, err):
+        await self.__server.notify("procErr", {"pid": self.__pid, "err": err})
+
     async def __read_out_worker(self):
         try:
+            reg_progress = re.compile(
+                r"> <string>\((\d+)\)<module>\(([\w|\W]*)\)")
+            reg_pdb = re.compile(r"\(Pdb\) ([\w|\W]*)")
+
             while not self.__proc.stdout.at_eof():
                 out = await self.__proc.stdout.readline()
                 out = str(out, encoding="utf-8")
+                loggers.get(MODUE_NAME).debug(f"##### {out}")
+
+                match_progress = reg_progress.match(out)
+                match_pdb = reg_pdb.match(out)
+
                 if len(out) <= 0:
                     await asyncio.sleep(0.1, loop=self.__loop)
-                elif "PDB" in out:
+                elif "--Return--" in out:
+                    pass
+                elif match_pdb:
+                    prog_out = match_pdb.groups()[0]
+                    match_progress = reg_progress.match(prog_out)
+                    if match_progress:
+                        progress, module = match_progress.groups()
+                        await self.__do_progress(int(progress))
+                    else:
+                        await self.__do_out(prog_out)
+                    # 需要輸入
                     if len(self.__pipe_hooks) > 0:
                         coro = self.__pipe_hooks.pop(0)
                         await coro()
                     else:
                         await self.__write("n")
+                elif match_progress:
+                    progress, module = match_progress.groups()
+                    await self.__do_progress(int(progress))
                 else:
-                    await self.__server.notify("read", {
-                        "pid": self.__pid,
-                        "type": "out",
-                        "data": out
-                    })
+                    await self.__do_out(out)
         except Exception as e:
             loggers.get(MODUE_NAME).warn(
                 f"PID({self.__pid}), Exception in read out worker: {e}")
@@ -96,11 +128,13 @@ class Debugger(object):
         while True:
             out, err = await asyncio.gather(proc.stdout.readline(),
                                             proc.stderr.readline())
+
             if len(out) > 0:
                 out = str(out, encoding="utf-8")
-                if "pid" in out:
-                    temp = out.split(" ")
-                    self.__pid = temp[1]
+                match_pid = re.match(r"pid (\d+)\r\n", out)
+                if match_pid:
+                    pid = match_pid.groups()[0]
+                    self.__pid = int(pid)
                     break
             elif len(err) > 0:
                 e = str(err, encoding="utf-8")
@@ -116,7 +150,6 @@ class Debugger(object):
 
         self.__state = "idle"
 
-    @logit
     async def __write(self, data: str):
         data = bytes(f"{data}\n", encoding="utf8")
         self.__proc.stdin.write(data)
@@ -129,55 +162,72 @@ class Debugger(object):
 
         await self.__write(portname)
         await self.__write(script)
+        await self.__write("n")
         event = asyncio.Event(loop=self.__loop)
+        event.clear()
 
         async def __start_hook():
             await self.__write("n")
             event.set()
 
         self.__pipe_hooks.append(__start_hook)
-        await event
+        await event.wait()
 
         self.__state = "running"
 
     @logit
-    async def supend(self):
+    async def pause(self):
         if self.__state != "running":
             raise Exception("Invaild state")
 
         event = asyncio.Event(loop=self.__loop)
+        event.clear()
 
-        async def __supend_hook():
+        async def __pause_hook():
             event.set()
 
-        self.__pipe_hooks.append(__supend_hook)
-        await event
+        self.__pipe_hooks.append(__pause_hook)
+        await event.wait()
 
-        self.__state = "supended"
+        self.__state = "paused"
 
     @logit
     async def resume(self):
-        if self.__state != "supended":
+        if self.__state != "paused":
             raise Exception("Invaild state")
 
         event = asyncio.Event(loop=self.__loop)
+        event.clear()
 
         async def __resume_hook():
             await self.__write("n")
             event.set()
 
         self.__pipe_hooks.append(__resume_hook)
-        await event
+        await event.wait()
 
-        self.__state = "supended"
+        self.__state = "paused"
 
     @logit
     async def stop(self):
-        if self.__state not in ["running", "idle", "supended"]:
+        if self.__state not in ["running", "idle", "paused"]:
             raise Exception("Invaild state")
 
-        self.__proc.terminate()
+        event = asyncio.Event(loop=self.__loop)
+        event.clear()
+
+        async def __stop_hook():
+            await self.__write("q")
+            event.set()
+
+        self.__pipe_hooks.append(__stop_hook)
+        await event.wait()
+
         await asyncio.gather(self.__proc.wait(), self.__read_out_task,
                              self.__read_err_task)
 
         self.__state = "stoped"
+
+    @logit
+    async def emergency_stop(self):
+        await self.stop()

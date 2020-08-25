@@ -7,9 +7,9 @@ import os
 {
     "jsonrpc": "2.0",
     "id": 1234213,
-    "method": "init",
+    "method": "start",
     "params": {
-        "script": "cHJpbnQoMTExMSk=",
+        "script": "aW1wb3J0IHRpbWUNCg0KDQp3aGlsZSAxOg0KICAgIHRpbWUuc2xlZXAoMSkNCiAgICBwcmludCgyMjIp",
         "portname": 222
     }
 }
@@ -17,10 +17,9 @@ import os
 {
     "jsonrpc": "2.0",
     "id": 1234213,
-    "method": "write",
+    "method": "stop",
     "params": {
-        "pid": 9372,
-        "data": "q"
+        "pid": 14224
     }
 }
 
@@ -39,20 +38,10 @@ class Serve(object):
         self.__server = RPCServer(self.__loop, ip, port)
         self.__log_level = log_level
         self.__log_dir = log_dir
-        loggers.set_use_console(True)
-        loggers.set_use_file(False)
-        loggers.set_filename(log_name)
-        if log_level == "info":
-            loggers.set_level(loggers.INFO)
-        elif log_level == "debug":
-            loggers.set_level(loggers.DEBUG)
-        else:
-            loggers.set_level(loggers.ERROR)
-
         self.__proc_map = {}
         self.__proc_idle = None
         self.__debugger_create_feature = asyncio.ensure_future(
-            self.__debugger_create_worker, loop=self.__loop)
+            self.__debugger_create_worker(), loop=self.__loop)
 
     async def __debugger_create_worker(self):
         app_dir = os.getcwd()
@@ -61,7 +50,7 @@ class Serve(object):
         debugger = f"{app_dir}\\debugger.exe" if platform.system(
         ) == "Windows" else f"{app_dir}/debugger"
 
-        cmd = f"{debugger} --level {log_level} --log_dir {log_dir} --mode debug"
+        cmd = f"{debugger} --log_level {log_level} --log_dir {log_dir} --mode debug"
 
         debugger = Debugger(self.__loop, self.__server)
 
@@ -86,23 +75,30 @@ class Serve(object):
         pid = self.__proc_idle.pid
         self.__proc_map[pid] = self.__proc_idle
         self.__proc_idle = None
-        return {"pid", pid}
+        self.__debugger_create_feature = asyncio.ensure_future(
+            self.__debugger_create_worker(), loop=self.__loop)
+        return {"pid": pid}
 
     async def __debugger_stop(self, pid: int):
         await self.__get_debugger(pid).stop()
         del self.__proc_map[pid]
 
-    async def __debugger_supend(self, pid: int):
-        await self.__get_debugger(pid).supend()
+    async def __debugger_pause(self, pid: int):
+        await self.__get_debugger(pid).pause()
 
     async def __debugger_resume(self, pid: int):
         await self.__get_debugger(pid).resume()
 
+    async def __debugger_emergency_stop(self, pid: int):
+        await self.__get_debugger(pid).emergency_stop()
+
     def start(self) -> None:
         self.__server.register('start', self.__debugger_start)
-        self.__server.register('stop', self.__debugger_stop)
+        self.__server.register('pause', self.__debugger_pause)
         self.__server.register('resume', self.__debugger_resume)
-        self.__server.register('supend', self.__debugger_supend)
+        self.__server.register('stop', self.__debugger_stop)
+        self.__server.register('emergency_stop',
+                               self.__debugger_emergency_stop)
 
         loggers.get(MODUE_NAME).info("running...")
         self.__loop.run_forever()

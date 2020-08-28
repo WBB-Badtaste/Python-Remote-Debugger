@@ -22,7 +22,8 @@ class Serve(object):
             self.__debugger_create_worker(), loop=self.__loop)
 
     def __on_debugger_die(self, pid):
-        self.__proc_map.pop(pid)
+        if pid in self.__proc_map:
+            self.__proc_map.pop(pid)
 
     async def __debugger_create_worker(self):
         app_dir = os.getcwd()
@@ -83,7 +84,11 @@ class Serve(object):
         for debugger in self.__proc_map.values():
             tasks.append(debugger.stop())
         await asyncio.gather(*tasks)
-        self.__loop.stop()
+
+        async def do_quit():
+            self.__loop.stop()
+
+        asyncio.ensure_future(do_quit(), loop=self.__loop)
 
     def start(self) -> None:
         self.__server.register('quit', self.__quit)

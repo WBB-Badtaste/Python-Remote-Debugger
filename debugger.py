@@ -69,10 +69,11 @@ class Debugger(object):
                 })
                 self.__out_datas.clear()
 
-            await self.__server.notify("progressFresh", {
-                "pid": self.__pid,
-                "progress": self.__progress
-            })
+            if self.__progress > 0:
+                await self.__server.notify("progressFresh", {
+                    "pid": self.__pid,
+                    "progress": self.__progress
+                })
 
             self.__on_quit(self.__pid)
         except Exception as e:
@@ -101,6 +102,9 @@ class Debugger(object):
                 f"PID({self.__pid}) read err worker exit.")
 
     async def __do_progress(self, progress):
+        if self.__progress <= 0:
+            return
+
         t = time.time()
         if t - self.__progress_timestamp > 1:
             self.__progress_timestamp = t
@@ -153,15 +157,6 @@ class Debugger(object):
                     continue
 
                 out = str(out, encoding="utf-8")
-                if "--Return--" in out:
-                    await self.__do_out(out)
-                    continue
-
-                match_progress = reg_progress.match(out)
-                if match_progress:
-                    progress, _ = match_progress.groups()
-                    await self.__do_progress(int(progress))
-                    continue
 
                 match_pdb = reg_pdb.match(out)
                 if match_pdb:
@@ -178,6 +173,16 @@ class Debugger(object):
                         await coro()
                     else:
                         await self.__write("n")
+                    continue
+                
+                if "--Return--" in out:
+                    await self.__do_out(out)
+                    continue
+
+                match_progress = reg_progress.match(out)
+                if match_progress:
+                    progress, _ = match_progress.groups()
+                    await self.__do_progress(int(progress))
                     continue
 
                 await self.__do_out(out)
@@ -294,6 +299,7 @@ class Debugger(object):
         if self.__state == "idle":
             await self.__write("quit")
         else:
+
             async def __stop_hook():
                 await self.__write("q")
 
@@ -302,11 +308,11 @@ class Debugger(object):
         t = time.time()
         while not self.__waitting_task.done():
             if time.time() - t > 3:
-                # if platform.system() == "Windows":
-                #     self.__proc.send_signal(signal.CTRL_C_EVENT)
-                # else:
-                #     self.__proc.send_signal(signal.SIGINT)
-                self.__proc.kill()
+                if platform.system() == "Windows":
+                    self.__proc.send_signal(signal.CTRL_C_EVENT)
+                else:
+                    self.__proc.send_signal(signal.SIGINT)
+                # self.__proc.kill()
             await asyncio.sleep(1, loop=self.__loop)
 
         await self.__waitting_task

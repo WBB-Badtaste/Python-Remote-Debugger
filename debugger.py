@@ -2,6 +2,9 @@ from DobotRPC import loggers, RPCServer
 import asyncio
 from functools import wraps
 import re
+import time
+import platform
+import signal
 
 MODUE_NAME = "Debugger"
 
@@ -19,8 +22,14 @@ def logit(func):
     return with_logging
 
 
+def timestamp(t):
+    data_secs = (t - int(t)) * 1000
+    data_head = time.strftime("%H:%M:%S", time.localtime(t))
+    return "%s.%03d" % (data_head, data_secs)
+
+
 class Debugger(object):
-    def __init__(self, loop, server: RPCServer):
+    def __init__(self, loop, server: RPCServer, on_quit):
         super().__init__()
         self.__loop = loop
         self.__server = server
@@ -34,6 +43,12 @@ class Debugger(object):
 
         self.__progress = -1
 
+        self.__out_timestamp = time.time()
+        self.__out_datas = []
+        self.__progress_timestamp = time.time()
+
+        self.__on_quit = on_quit
+
     @property
     def pid(self):
         return self.__pid
@@ -41,6 +56,32 @@ class Debugger(object):
     @property
     def state(self):
         return self.__state
+
+    async def __waitting_worker(self):
+        try:
+            await asyncio.gather(self.__proc.wait(), self.__read_out_task,
+                                 self.__read_err_task)
+
+            if len(self.__out_datas) > 0:
+                await self.__server.notify("procOut", {
+                    "pid": self.__pid,
+                    "out": self.__out_datas
+                })
+                self.__out_datas.clear()
+
+            await self.__server.notify("progressFresh", {
+                "pid": self.__pid,
+                "progress": self.__progress
+            })
+
+            self.__on_quit(self.__pid)
+        except Exception as e:
+            loggers.get(MODUE_NAME).warn(
+                f"PID({self.__pid}), Exception in waitting worker: {e}",
+                exc_info=True)
+        finally:
+            loggers.get(MODUE_NAME).debug(
+                f"PID({self.__pid}) waitting worker exit.")
 
     async def __read_err_worker(self):
         try:
@@ -53,24 +94,50 @@ class Debugger(object):
                 await self.__do_err(err)
         except Exception as e:
             loggers.get(MODUE_NAME).warn(
-                f"PID({self.__pid}), Exception in read err worker: {e}")
+                f"PID({self.__pid}), Exception in read err worker: {e}",
+                exc_info=True)
         finally:
             loggers.get(MODUE_NAME).debug(
                 f"PID({self.__pid}) read err worker exit.")
 
     async def __do_progress(self, progress):
+        t = time.time()
+        if t - self.__progress_timestamp > 1:
+            self.__progress_timestamp = t
+        else:
+            return
+
         if self.__progress != progress:
             self.__progress = progress
             await self.__server.notify("progressFresh", {
                 "pid": self.__pid,
-                "progress": progress
+                "progress": self.__progress
             })
 
     async def __do_out(self, out):
-        await self.__server.notify("procOut", {"pid": self.__pid, "out": out})
+        t = time.time()
+        self.__out_datas.append({"time": timestamp(t), "data": out})
+
+        if t - self.__out_timestamp > 0.1:
+            self.__out_timestamp = t
+        else:
+            return
+
+        await self.__server.notify("procOut", {
+            "pid": self.__pid,
+            "out": self.__out_datas
+        })
+        self.__out_datas.clear()
 
     async def __do_err(self, err):
-        await self.__server.notify("procErr", {"pid": self.__pid, "err": err})
+        await self.__server.notify(
+            "procErr", {
+                "pid": self.__pid,
+                "err": [{
+                    "time": timestamp(time.time()),
+                    "data": err
+                }]
+            })
 
     async def __read_out_worker(self):
         try:
@@ -80,21 +147,28 @@ class Debugger(object):
 
             while not self.__proc.stdout.at_eof():
                 out = await self.__proc.stdout.readline()
-                out = str(out, encoding="utf-8")
-                loggers.get(MODUE_NAME).debug(f"##### {out}")
-
-                match_progress = reg_progress.match(out)
-                match_pdb = reg_pdb.match(out)
 
                 if len(out) <= 0:
                     await asyncio.sleep(0.1, loop=self.__loop)
-                elif "--Return--" in out:
-                    pass
-                elif match_pdb:
+                    continue
+
+                out = str(out, encoding="utf-8")
+                if "--Return--" in out:
+                    await self.__do_out(out)
+                    continue
+
+                match_progress = reg_progress.match(out)
+                if match_progress:
+                    progress, _ = match_progress.groups()
+                    await self.__do_progress(int(progress))
+                    continue
+
+                match_pdb = reg_pdb.match(out)
+                if match_pdb:
                     prog_out = match_pdb.groups()[0]
                     match_progress = reg_progress.match(prog_out)
                     if match_progress:
-                        progress, module = match_progress.groups()
+                        progress, _ = match_progress.groups()
                         await self.__do_progress(int(progress))
                     else:
                         await self.__do_out(prog_out)
@@ -104,14 +178,13 @@ class Debugger(object):
                         await coro()
                     else:
                         await self.__write("n")
-                elif match_progress:
-                    progress, module = match_progress.groups()
-                    await self.__do_progress(int(progress))
-                else:
-                    await self.__do_out(out)
+                    continue
+
+                await self.__do_out(out)
         except Exception as e:
             loggers.get(MODUE_NAME).warn(
-                f"PID({self.__pid}), Exception in read out worker: {e}")
+                f"PID({self.__pid}), Exception in read out worker: {e}",
+                exc_info=True)
         finally:
             loggers.get(MODUE_NAME).debug(
                 f"PID({self.__pid}) read out worker exit.")
@@ -146,6 +219,8 @@ class Debugger(object):
         self.__read_out_task = asyncio.ensure_future(self.__read_out_worker(),
                                                      loop=self.__loop)
         self.__read_err_task = asyncio.ensure_future(self.__read_err_worker(),
+                                                     loop=self.__loop)
+        self.__waitting_task = asyncio.ensure_future(self.__waitting_worker(),
                                                      loop=self.__loop)
 
         self.__state = "idle"
@@ -216,18 +291,25 @@ class Debugger(object):
         if self.__state not in ["running", "idle", "paused"]:
             raise Exception("Invaild state")
 
-        event = asyncio.Event(loop=self.__loop)
-        event.clear()
+        if self.__state == "idle":
+            await self.__write("quit")
+        else:
+            async def __stop_hook():
+                await self.__write("q")
 
-        async def __stop_hook():
-            await self.__write("q")
-            event.set()
+            self.__pipe_hooks.append(__stop_hook)
 
-        self.__pipe_hooks.append(__stop_hook)
-        await event.wait()
+        t = time.time()
+        while not self.__waitting_task.done():
+            if time.time() - t > 3:
+                # if platform.system() == "Windows":
+                #     self.__proc.send_signal(signal.CTRL_C_EVENT)
+                # else:
+                #     self.__proc.send_signal(signal.SIGINT)
+                self.__proc.kill()
+            await asyncio.sleep(1, loop=self.__loop)
 
-        await asyncio.gather(self.__proc.wait(), self.__read_out_task,
-                             self.__read_err_task)
+        await self.__waitting_task
 
         self.__state = "stoped"
 

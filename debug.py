@@ -14,7 +14,13 @@ def debug(log_level: str, log_dir: str) -> None:
         loggers.get(MODULE_NAME).info("waitting input...")
 
         portname = input()
+        if portname == "quit":
+            return
+
         script = input()
+        if portname == "quit":
+            return
+
         script = base64.b64decode(script)
         dType = DType()
 
@@ -23,4 +29,4 @@ def debug(log_level: str, log_dir: str) -> None:
 
         pdb.run(script, {"dType": dType, "api": portname})
     except Exception as e:
-        loggers.get(MODULE_NAME).error(e)
+        loggers.get(MODULE_NAME).exception(e)

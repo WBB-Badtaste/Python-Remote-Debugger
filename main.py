@@ -6,7 +6,7 @@ import os
 import platform
 
 IP = "127.0.0.1"
-PORT = 9094
+PORT = 9099
 
 
 @click.command()

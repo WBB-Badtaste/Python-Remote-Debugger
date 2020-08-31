@@ -29,7 +29,7 @@ def timestamp(t):
 
 
 class Debugger(object):
-    def __init__(self, loop, server: RPCServer, on_quit):
+    def __init__(self, loop, server: RPCServer):
         super().__init__()
         self.__loop = loop
         self.__server = server
@@ -46,8 +46,6 @@ class Debugger(object):
         self.__out_timestamp = time.time()
         self.__out_datas = []
         self.__progress_timestamp = time.time()
-
-        self.__on_quit = on_quit
 
     @property
     def pid(self):
@@ -74,8 +72,6 @@ class Debugger(object):
                     "pid": self.__pid,
                     "progress": self.__progress
                 })
-
-            self.__on_quit(self.__pid)
         except Exception as e:
             loggers.get(MODUE_NAME).warn(
                 f"PID({self.__pid}), Exception in waitting worker: {e}",
@@ -174,9 +170,10 @@ class Debugger(object):
                     else:
                         await self.__write("n")
                     continue
-                
+
                 if "--Return--" in out:
                     await self.__do_out(out)
+                    await self.__write("q")
                     continue
 
                 match_progress = reg_progress.match(out)
@@ -236,6 +233,10 @@ class Debugger(object):
         await self.__proc.stdin.drain()
 
     @logit
+    async def wait(self):
+        await self.__waitting_task
+
+    @logit
     async def start(self, portname: str, script: str):
         if self.__state not in ["stop", "idle"]:
             raise Exception("Invaild state")
@@ -289,7 +290,7 @@ class Debugger(object):
         self.__pipe_hooks.append(__resume_hook)
         await event.wait()
 
-        self.__state = "paused"
+        self.__state = "running"
 
     @logit
     async def stop(self):
@@ -298,6 +299,8 @@ class Debugger(object):
 
         if self.__state == "idle":
             await self.__write("quit")
+        elif self.__state == "paused":
+            await self.__write("q")
         else:
 
             async def __stop_hook():
@@ -314,8 +317,6 @@ class Debugger(object):
                     self.__proc.send_signal(signal.SIGINT)
                 # self.__proc.kill()
             await asyncio.sleep(1, loop=self.__loop)
-
-        await self.__waitting_task
 
         self.__state = "stoped"
 

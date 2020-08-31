@@ -21,10 +21,6 @@ class Serve(object):
         self.__debugger_create_feature = asyncio.ensure_future(
             self.__debugger_create_worker(), loop=self.__loop)
 
-    def __on_debugger_die(self, pid):
-        if pid in self.__proc_map:
-            self.__proc_map.pop(pid)
-
     async def __debugger_create_worker(self):
         app_dir = os.getcwd()
         log_dir = self.__log_dir or app_dir
@@ -36,8 +32,10 @@ class Serve(object):
 
         while self.__proc_idle is None:
             try:
-                debugger = Debugger(self.__loop, self.__server,
-                                    self.__on_debugger_die)
+                debugger = Debugger(
+                    self.__loop,
+                    self.__server,
+                )
                 await debugger.create_process(cmd)
                 self.__proc_idle = debugger
                 loggers.get(MODUE_NAME).info(
@@ -67,7 +65,6 @@ class Serve(object):
 
     async def __debugger_stop(self, pid: int):
         await self.__get_debugger(pid).stop()
-        del self.__proc_map[pid]
 
     async def __debugger_pause(self, pid: int):
         await self.__get_debugger(pid).pause()
@@ -77,6 +74,11 @@ class Serve(object):
 
     async def __debugger_emergency_stop(self, pid: int):
         await self.__get_debugger(pid).emergency_stop()
+
+    async def __debugger_wait(self, pid: int):
+        await self.__get_debugger(pid).wait()
+        if pid in self.__proc_map:
+            self.__proc_map.pop(pid)
 
     async def __quit(self):
         await self.__debugger_create_feature
@@ -96,6 +98,7 @@ class Serve(object):
         self.__server.register('pause', self.__debugger_pause)
         self.__server.register('resume', self.__debugger_resume)
         self.__server.register('stop', self.__debugger_stop)
+        self.__server.register('wait', self.__debugger_wait)
         self.__server.register('emergency_stop',
                                self.__debugger_emergency_stop)
 

@@ -13,13 +13,20 @@ class Serve(object):
                  log_dir: str):
         super().__init__()
         self.__loop = asyncio.get_event_loop()
-        self.__server = RPCServer(self.__loop, ip, port)
+        self.__server = RPCServer(self.__loop, ip, port,
+                                  self.__on_disconnected)
         self.__log_level = log_level
         self.__log_dir = log_dir
         self.__proc_map = {}
         self.__proc_idle = None
         self.__debugger_create_feature = asyncio.ensure_future(
             self.__debugger_create_worker(), loop=self.__loop)
+
+    async def __on_disconnected(self):
+        tasks = []
+        for debugger in self.__proc_map.values():
+            tasks.append(debugger.stop())
+        await asyncio.gather(*tasks)
 
     async def __debugger_create_worker(self):
         app_dir = os.getcwd()

@@ -115,6 +115,8 @@ class Debugger(object):
             })
 
     async def __do_out(self, out):
+        loggers.get(MODUE_NAME).debug(f"process({self.__pid}) out: {out}")
+
         t = time.time()
         self.__out_datas.append({"time": timestamp(t), "data": out})
 
@@ -130,6 +132,8 @@ class Debugger(object):
         self.__out_datas.clear()
 
     async def __do_err(self, err):
+        loggers.get(MODUE_NAME).debug(f"process({self.__pid}) err: {err}")
+
         await self.__server.notify(
             "procErr", {
                 "pid": self.__pid,

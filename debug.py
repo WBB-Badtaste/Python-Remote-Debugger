@@ -30,3 +30,4 @@ def debug(log_level: str, log_dir: str) -> None:
         pdb.run(script, {"dType": dType, "api": portname})
     except Exception as e:
         loggers.get(MODULE_NAME).exception(e)
+        raise

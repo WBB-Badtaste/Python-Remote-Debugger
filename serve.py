@@ -57,12 +57,11 @@ class Serve(object):
             raise Exception(f"Invaild pid: {pid}")
         return debugger
 
-    async def __debugger_start(self, portname: str, script: str):
+    async def __debugger_prepare(self):
         if len(self.__proc_map) >= DEBUGGER_MAX_NUM:
             raise Exception("debugger num max")
 
         await self.__debugger_create_feature
-        await self.__proc_idle.start(portname, script)
         pid = self.__proc_idle.pid
         self.__proc_map[pid] = self.__proc_idle
         self.__proc_idle = None
@@ -70,8 +69,14 @@ class Serve(object):
             self.__debugger_create_worker(), loop=self.__loop)
         return {"pid": pid}
 
+    async def __debugger_start(self, pid: int, portname: str, script: str):
+        await self.__get_debugger(pid).start(portname, script)
+
     async def __debugger_stop(self, pid: int):
         await self.__get_debugger(pid).stop()
+
+    async def __debugger_finally(self, pid: int):
+        pass
 
     async def __debugger_pause(self, pid: int):
         await self.__get_debugger(pid).pause()
@@ -101,7 +106,9 @@ class Serve(object):
 
     def start(self) -> None:
         self.__server.register('quit', self.__quit)
+        self.__server.register('prepare', self.__debugger_prepare)
         self.__server.register('start', self.__debugger_start)
+        self.__server.register('finally', self.__debugger_finally)
         self.__server.register('pause', self.__debugger_pause)
         self.__server.register('resume', self.__debugger_resume)
         self.__server.register('stop', self.__debugger_stop)

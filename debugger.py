@@ -204,22 +204,39 @@ class Debugger(object):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE)
 
-        while True:
-            out, err = await asyncio.gather(proc.stdout.readline(),
-                                            proc.stderr.readline())
+        loggers.get(MODUE_NAME).info("object create")
 
-            if len(out) > 0:
+        while 1:
+            out_task = asyncio.ensure_future(proc.stdout.readline(),
+                                             loop=self.__loop)
+            err_task = asyncio.ensure_future(proc.stderr.readline(),
+                                             loop=self.__loop)
+
+            done, pending = await asyncio.wait(
+                [out_task, err_task],
+                loop=self.__loop,
+                return_when=asyncio.FIRST_COMPLETED)
+
+            for task in pending:
+                task.cancel()
+
+            if out_task in done:
+                out = out_task.result()
                 out = str(out, encoding="utf-8")
+                loggers.get(MODUE_NAME).info(f"{out}")
+
                 match_pid = re.match(r"pid (\d+)\r\n", out)
                 if match_pid:
                     pid = match_pid.groups()[0]
                     self.__pid = int(pid)
-                    break
-            elif len(err) > 0:
+                    break  # 一定要获取到pid才算完成创建
+
+            if err_task in done:
+                err = err_task.result()
                 e = str(err, encoding="utf-8")
                 loggers.get(MODUE_NAME).error(e)
-            else:
-                await asyncio.sleep(0.1, loop=self.__loop)
+
+        loggers.get(MODUE_NAME).info("init tasks")
 
         self.__proc = proc
         self.__read_out_task = asyncio.ensure_future(self.__read_out_worker(),
@@ -230,6 +247,7 @@ class Debugger(object):
                                                      loop=self.__loop)
 
         self.__state = "idle"
+        loggers.get(MODUE_NAME).info("idle")
 
     async def __write(self, data: str):
         data = bytes(f"{data}\n", encoding="utf8")

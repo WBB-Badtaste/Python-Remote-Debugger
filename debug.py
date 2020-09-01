@@ -14,10 +14,12 @@ def debug(log_level: str, log_dir: str) -> None:
         loggers.get(MODULE_NAME).info("waitting input...")
 
         portname = input()
+        loggers.get(MODULE_NAME).debug(portname)
         if portname == "quit":
             return
 
         script = input()
+        loggers.get(MODULE_NAME).debug(script)
         if portname == "quit":
             return
 
